@@ -76,14 +76,18 @@ class SolpsRun(SimulationRun):
 class Solps(Simulation):
     def __init__(
         self,
+        reference_directory: Path,
         transport_profile_bounds: tuple[float, float],
-        set_div_transport=False,
-        n_proc=1,
-        timeout_hours=24
+        set_div_transport: bool = False,
+        n_proc: int = 1,
+        memory_gb: int = 20,
+        timeout_hours: int = 24,
     ):
+        self.reference_directory = reference_directory
         self.transport_bounds = transport_profile_bounds
         self.set_div_transport = set_div_transport
         self.n_proc = n_proc
+        self.memory = memory_gb
         self.timeout_hours = timeout_hours
 
     def launch(
@@ -105,7 +109,7 @@ class Solps(Simulation):
         case_dir = simulations_directory / f"run_{run_number}"
 
         build_solps_case(
-            simulations_directory=simulations_directory,
+            reference_directory=self.reference_directory,
             case_directory=case_dir,
             parameter_dictionary=parameters
         )
@@ -135,7 +139,7 @@ class Solps(Simulation):
         # Go to the SOLPS run directory to prepare execution
         os.chdir(case_dir)
 
-        command = "itmsubmit" if self.n_proc == 1 else f'itmsubmit -m "-np {self.n_proc}"'
+        command = "itmsubmit" if self.n_proc == 1 else f'itmsubmit -m "-np {self.n_proc}" -M {self.memory}GB'
         start_run = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
 
         start_run_output = start_run.communicate()[0]
@@ -157,12 +161,14 @@ class Solps(Simulation):
 
 
 def build_solps_case(
-    simulations_directory: Path,
+    reference_directory: Path,
     case_directory: Path,
     parameter_dictionary: dict
 ):
     input_files = [
         "input.dat",
+        "fort.1",
+        "fort.13",
         "b2.neutrals.parameters",
         "b2.boundary.parameters",
         "b2.numerics.parameters",
@@ -172,16 +178,16 @@ def build_solps_case(
 
     # create the case directory and copy all the reference files
     case_directory.mkdir()
-    sh.copy(simulations_directory / "b2fstate", case_directory / "b2fstati")
+    sh.copy(reference_directory / "b2fstate", case_directory / "b2fstati")
     for input in input_files:
-        if isfile(simulations_directory / input):
-            sh.copy(simulations_directory / input, case_directory / input)
+        if isfile(reference_directory / input):
+            sh.copy(reference_directory / input, case_directory / input)
 
     optional_params = {k for k in parameter_dictionary.keys()} - required_parameters
     written_params = set()
 
     mesa_input_files = [f + ".mesa" for f in input_files]
-    mesa_input_files = [f for f in mesa_input_files if isfile(simulations_directory / f)]
+    mesa_input_files = [f for f in mesa_input_files if isfile(reference_directory / f)]
 
     if len(optional_params) != 0:
         if len(mesa_input_files) == 0:
@@ -197,7 +203,7 @@ def build_solps_case(
 
         for mif in mesa_input_files:
             output = []
-            with open(simulations_directory / mif) as f:
+            with open(reference_directory / mif) as f:
                 for line in f:
                     for p in optional_params:
                         if '{'+p+'}' in line:

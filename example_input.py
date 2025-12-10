@@ -1,9 +1,11 @@
+from mesa.core import Mesa
+
 # ----------------------------------------------------------------------------
 #   path settings
 # ----------------------------------------------------------------------------
 from pathlib import Path
 # directory where a reference SOLPS run is stored
-simulations_directory = Path('/pfs/work/g2hjame/solps-iter/runs/TCV_58196_small/ref_clean/')
+simulations_directory = Path('/pfs/work/g2dmoult/solps-iter_3.0.9_develop/runs/mastu_sxd_46860_450ms_Donly')
 
 # file name in which the training data will be stored
 evaluations_filepath = simulations_directory / "evaluations_data.h5"
@@ -17,12 +19,12 @@ from sims.instruments import ThomsonScattering
 from mesa_solps.simulation import Solps
 from mesa_solps.objective import SolpsLikelihood
 
-instrument_data = load('# instrument data path #')
+instrument_data = load('/pfs/work/g2dmoult/mesa-solps/testing_ts_instrument_data.npz')
 TS = ThomsonScattering(
     R=instrument_data['R'],
     z=instrument_data['z'],
     weights=instrument_data['weights'],
-    measurements=load('# measurement data path #')
+    measurements=load('/pfs/work/g2dmoult/mesa-solps/testing_ts_data.npz')
 )
 
 objective_function = SolpsLikelihood(diagnostics=[TS])
@@ -32,10 +34,12 @@ objective_function = SolpsLikelihood(diagnostics=[TS])
 #   simulation settings
 # ----------------------------------------------------------------------------
 simulation = Solps(
-    n_proc=6,
+    n_proc=36,
+    memory_gb=20,
     timeout_hours=24,
     set_div_transport=True,
-    transport_profile_bounds=(-0.250, 0.240)
+    transport_profile_bounds=(-0.250, 0.240),
+    reference_directory=simulations_directory / "ref_clean"
 )
 
 
@@ -49,7 +53,7 @@ strategy = GPOptimizer(
     covariance_kernel=SquaredExponential(),
     mean_function=QuadraticMean(),
     acquisition_function=UpperConfidenceBound(kappa=1.),
-    initial_sample_count=0,
+    initial_sample_count=20,
     cross_validation=False,
     trust_region_width=0.3,
     n_processes=1,
@@ -83,3 +87,16 @@ parameters = {
     'D_gap_left'       : (2e-3, 0.05),    # radius gap between left-midpoint and transport barrier
     'D_gap_right'      : (2e-3, 0.05),    # radius gap between right-midpoint and transport barrier
 }
+
+mesa = Mesa(
+    parameters=parameters,
+    simulation=simulation,
+    objective_function=objective_function,
+    strategy=strategy,
+    simulations_directory=simulations_directory,
+    evaluations_filepath=evaluations_filepath,
+    max_concurrent_runs=4,
+    max_iterations=60
+)
+
+mesa.run()
