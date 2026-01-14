@@ -5,6 +5,8 @@ from time import time
 import logging
 import subprocess
 import shutil as sh
+from scipy.io import netcdf
+from numpy import log, polyfit, searchsorted
 
 from sims.interface import SolpsInterface
 from mesa.simulations import RunStatus, Simulation, SimulationRun
@@ -44,6 +46,11 @@ class SolpsRun(SimulationRun):
             status = "complete" if balance_created else "crashed"
         elif (time() - self.launch_time) > self.timeout_hours * 3600.:
             status = "timed-out"
+        elif check_convergence(minimum_run_time=1e-3, window=2e-4):
+            quit_file = self.directory / "b2mn.exe.dir/.quit"
+            if not isfile(quit_file):
+                subprocess.run(["touch", quit_file], encoding="utf-8")
+            status = "running"
         else:
             status = "running"
         return status
@@ -227,3 +234,29 @@ def build_solps_case(
                 """
             )
 
+
+def check_convergence(minimum_run_time: float, window: float) -> bool:
+    with netcdf.netcdf_file("./b2time.nc", "r") as solps:
+        ne = solps.variables["ne3da"].data.copy()
+        te = solps.variables["te3da"].data.copy() / 1.602e-19
+        time = solps.variables["timesa"].data.copy()
+
+    assert minimum_run_time > window
+    run_time = time.max() - time.min()
+    if run_time < minimum_run_time:
+        return False
+
+    index = searchsorted(time, time.max() - window)
+    log_te = log(te)[index:]
+    log_ne = log(ne)[index:]
+    fit_time = time[index:]
+
+    te_gradients = polyfit(x=fit_time, y=log_te, deg=1)[0, :]
+    te_timescales = 1 / abs(te_gradients)
+
+    ne_gradients = polyfit(x=fit_time, y=log_ne, deg=1)[0, :]
+    ne_timescales = 1 / abs(ne_gradients)
+
+
+    converged = (te_timescales > 1.0).all() and (ne_timescales > 1.0).all()
+    return converged
